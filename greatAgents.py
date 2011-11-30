@@ -26,9 +26,20 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    
+    self.agents = ["experimental", "defense", "defense"]
+  
   def getAgent(self, index):
-    return OffensiveGreatAgent(index)
+      return self.choose(self.agents.pop(0), index)
+
+  def choose(self, agentStr, index):
+    if agentStr == 'offense':
+      return OffensiveGreatAgent(index)
+    elif agentStr == 'defense':
+      return DefensiveGreatAgent(index)
+    elif agentStr == 'experimental':
+      return ExperimentalAgent(index)
+    else:
+      raise Exception("No staff agent identified by " + agentStr)
 
 ##########
 # Agents #
@@ -185,10 +196,10 @@ class GreatAgent(CaptureAgent):
       beliefs.normalize()
     
     # print out opponents' positions (max prob)
-    if self.index == 0 or self.index == 1:
-      self.displayDistributionsOverPositions(self.opponentBeliefs)
-      for index, pos in enumerate(self.opponentPositions):
-        print opponents[index], pos, self.opponentBeliefs[index]
+    #if self.index == 0 or self.index == 1:
+    #  self.displayDistributionsOverPositions(self.opponentBeliefs)
+    #  for index, pos in enumerate(self.opponentPositions):
+    #    print opponents[index], pos, self.opponentBeliefs[index]
 
   def getSuccessor(self, gameState, action):
     """
@@ -290,6 +301,61 @@ class GreatAgent(CaptureAgent):
       if not walls.data[next_x][next_y]: neighbors.append((next_x, next_y))
     return neighbors
 
+class ExperimentalAgent(GreatAgent):
+ 
+  def getFeatures(self, gameState, action):
+    successor= self.getSuccessor(gameState, action)
+    nextPosition = successor.getAgentPosition(self.index)
+    features = util.Counter()
+    
+    foodList = self.getFood(successor).asList()
+    foodScore = 0
+    for food in foodList:
+      foodScore += 1.0 / self.getMazeDistance(nextPosition, food)
+    features['foodProximity'] = foodScore 
+    
+    features['foodLeft'] = len(foodList)
+    
+    threateningEnemyPositions = []
+    opponentIndices = self.getOpponents(successor)
+    for i, position in enumerate(self.opponentPositions):
+      opponentState = successor.getAgentState(opponentIndices[i])
+      if not opponentState.isPacman:
+        threateningEnemyPositions.append(position)
+    
+    if len(threateningEnemyPositions) > 0:
+      closestOpponentDistance = self.getMazeDistance(threateningEnemyPositions[0], nextPosition)
+      for p in threateningEnemyPositions[1:]:
+        opponentDistance = self.getMazeDistance(p, nextPosition)
+        if opponentDistance < closestOpponentDistance:
+          closestOpponentDistance = opponentDistance
+      features['closestGhostDistanceInverse'] = 1.0 / (closestOpponentDistance + 1)
+    
+    features['inADeadEndWithGhostNearby'] = self.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
+    
+    #if self.index == 1:
+     # print nextPosition
+     # print "Food Proximity:", foodScore
+     # print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
+     # print threateningEnemyPositions
+          
+    return features
+
+  def getWeights(self, gameState, action):
+    successorState = self.getSuccessor(gameState, action)
+    weights = util.Counter()
+    weights['foodProximity'] = 1
+    weights['foodLeft'] = -5
+    
+    weights['closestGhostDistanceInverse'] = -3
+    if successorState.getAgentState(self.index).isPacman:
+      weights['inADeadEndWithGhostNearby'] = -1
+    else:
+      weights['inADeadEndWithGhostNearby'] = 0
+    
+    return weights
+
+
 class OffensiveGreatAgent(GreatAgent):
   """
   A reflex agent that seeks food. This is an agent
@@ -339,12 +405,17 @@ class DefensiveGreatAgent(GreatAgent):
     features['onDefense'] = 1
     if myState.isPacman: features['onDefense'] = 0
 
-    # Computes distance to invaders we can see
-    enemies = [successor.getAgentState(i) for i in self.getOpponents(successor)]
-    invaders = [a for a in enemies if a.isPacman and a.getPosition() != None]
-    features['numInvaders'] = len(invaders)
-    if len(invaders) > 0:
-      dists = [self.getMazeDistance(myPos, a.getPosition()) for a in invaders]
+    # Computes distance to all invaders
+    invaderPositions = []
+    opponentIndices = self.getOpponents(successor)
+    for i, position in enumerate(self.opponentPositions):
+      opponentState = successor.getAgentState(opponentIndices[i])
+      if opponentState.isPacman:
+        invaderPositions.append(position)
+    
+    features['numInvaders'] = len(invaderPositions)
+    if len(invaderPositions) > 0:
+      dists = [self.getMazeDistance(myPos, pos) for pos in invaderPositions]
       features['invaderDistance'] = min(dists)
 
     if action == Directions.STOP: features['stop'] = 1
