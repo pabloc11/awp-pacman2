@@ -69,11 +69,17 @@ class GreatAgent(CaptureAgent):
     
     self.walls = gameState.getWalls()
     
+    
     # Find all possible legal positions
-    legalPositions = [p for p in gameState.getWalls().asList(False) if p[1] > 1]
+    width = self.getLayoutWidth(gameState)
+    height = self.getLayoutHeight(gameState)
     beliefs = util.Counter()
-    for p in legalPositions:
-      beliefs[p] = 1
+    legalPositions = []
+    for i in range(0, width):
+      for j in range(0, height):
+        if gameState.hasWall(i,j) == False:
+          legalPositions.append((i,j))
+          beliefs[(i,j)] = 1
     beliefs.normalize()
                 
     # set up beliefs for each opponent agent
@@ -82,6 +88,34 @@ class GreatAgent(CaptureAgent):
     
     for opponentIndex in self.getOpponents(gameState):
       self.opponentBeliefs.append(beliefs.copy())
+      
+    # Find all dead ends in the maze
+    numLegalNeighbors = util.Counter()
+    possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    self.deadEnds = util.Counter()
+    frontier = []
+    
+    for p in legalPositions:
+      numLegalNeighbors[p] = 0
+      for dx, dy in possibleDeltas:
+        if not gameState.hasWall(p[0] + dx, p[1] + dy):
+          numLegalNeighbors[p] += 1
+      if numLegalNeighbors[p] == 1:
+        frontier.append(p)
+    
+    while len(frontier) > 0:
+      cur = frontier.pop(0)
+      numNonDeadEndNeighbors = 0
+      for dx, dy in possibleDeltas:
+        neighbor = (cur[0] + dx, cur[1] + dy)
+        if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
+          numNonDeadEndNeighbors += 1
+      if numNonDeadEndNeighbors == 1:
+        self.deadEnds[cur] = 1
+        for dx, dy in possibleDeltas:
+          neighbor = (cur[0] + dx, cur[1] + dy)
+          if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
+            frontier.append(neighbor)
     
   """
   A base class for reflex agents that chooses score-maximizing actions
@@ -206,7 +240,7 @@ class GreatAgent(CaptureAgent):
     features['xRelativeToFriends'] = distances
     
     enemyX = 0.0
-    for epos in self.getOpponentPositions(successor):
+    for epos in self.opponentPositions:
       if epos is not None:
         enemyX = enemyX + epos[0]
     features['avgEnemyX'] = distances
@@ -222,7 +256,7 @@ class GreatAgent(CaptureAgent):
     features['enemyPacmanNearMe'] = 0.0
     minOppDist = 10000
     minOppPos = (0, 0)
-    for ep in self.getOpponentPositions(successor):
+    for ep in self.opponentPositions:
       # For a feature later on
       if ep is not None and self.getMazeDistance(ep, position) < minOppDist:
         minOppDist = self.getMazeDistance(ep, position)
