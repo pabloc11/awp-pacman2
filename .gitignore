@@ -1,2 +1,9 @@
 .project
 .pydevproject
+.pyc
+GPATH
+GRTAGS
+GSYMS
+GTAGS
+tags
+                    
