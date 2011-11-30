@@ -122,12 +122,23 @@ class GreatAgent(CaptureAgent):
         if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
           numNonDeadEndNeighbors += 1
       if numNonDeadEndNeighbors == 1:
+        self.increment(cur, util.Counter())
         self.deadEnds[cur] = 1
         for dx, dy in possibleDeltas:
           neighbor = (cur[0] + dx, cur[1] + dy)
           if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
             frontier.append(neighbor)
+
+  def increment(self, position, alreadyVisited):
+    if self.deadEnds[position] > 0:
+      self.deadEnds[position] += 1
+      alreadyVisited[position] = 1
     
+    possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+    for dx, dy in possibleDeltas:
+      neighbor = (position[0] + dx, position[1] + dy)
+      if self.deadEnds[neighbor] > 0 and alreadyVisited[neighbor] == 0:
+        self.increment(neighbor, alreadyVisited)
   """
   A base class for reflex agents that chooses score-maximizing actions
   """
@@ -348,10 +359,9 @@ class ExperimentalAgent(GreatAgent):
     weights['foodLeft'] = -5
     
     weights['closestGhostDistanceInverse'] = -3
+
     if successorState.getAgentState(self.index).isPacman:
       weights['inADeadEndWithGhostNearby'] = -1
-    else:
-      weights['inADeadEndWithGhostNearby'] = 0
     
     return weights
 
