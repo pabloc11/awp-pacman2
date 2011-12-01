@@ -202,8 +202,10 @@ class GreatAgent(CaptureAgent):
             beliefs[pos] *= distanceProb
         self.opponentPositions[i] = beliefs.argMax()
       else:
-        # update beliefs for known opponent position, zero down all other possibilities
-        beliefs[(position)] = 10000
+            for pos in beliefs:
+                if beliefs[pos] > 0:
+                    beliefs[pos] = 0
+            beliefs[(position)] = 1
       beliefs.normalize()
     
     # print out opponents' positions (max prob)
