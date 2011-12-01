@@ -27,30 +27,38 @@ class GreatAgents(AgentFactory):
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
     self.agents = ["experimental", "defense", "defense"]
-  
+    self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
 
   def choose(self, agentStr, index):
     if agentStr == 'offense':
-      return OffensiveGreatAgent(index)
+      return OffensiveGreatAgent(index, self.teamData)
     elif agentStr == 'defense':
-      return DefensiveGreatAgent(index)
+      return DefensiveGreatAgent(index, self.teamData)
     elif agentStr == 'experimental':
-      return ExperimentalAgent(index)
+      return ExperimentalAgent(index, self.teamData)
     else:
       raise Exception("No staff agent identified by " + agentStr)
+
+class TeamData:
+  def __init__(self):
+    self.initialized = False
+    self.opponentBeliefs = []
+    self.opponentPositions = []
+    self.deadEnds = util.Counter()
 
 ##########
 # Agents #
 ##########
 
 class GreatAgent(CaptureAgent):
-  def __init__(self, index):
+  def __init__(self, index, teamData):
     CaptureAgent.__init__(self, index)
     self.firstTurnComplete = False
     self.startingFood = 0
     self.theirStartingFood = 0
+    self.teamData = teamData
   
   def registerInitialState(self, gameState):
     """
@@ -81,6 +89,12 @@ class GreatAgent(CaptureAgent):
     self.walls = gameState.getWalls()
     
     
+    if self.teamData.initialized == False:
+      self.initializeTeamData(gameState)
+      self.teamData.initialized = True
+
+  
+  def initializeTeamData(self, gameState):
     # Find all possible legal positions
     width = self.getLayoutWidth(gameState)
     height = self.getLayoutHeight(gameState)
@@ -94,16 +108,16 @@ class GreatAgent(CaptureAgent):
     beliefs.normalize()
                 
     # set up beliefs for each opponent agent
-    self.opponentBeliefs = []
-    self.opponentPositions = self.getOpponentPositions(gameState)
+    #self.teamData.opponentBeliefs = []
+    self.teamData.opponentPositions = self.getOpponentPositions(gameState)
     
     for opponentIndex in self.getOpponents(gameState):
-      self.opponentBeliefs.append(beliefs.copy())
+      self.teamData.opponentBeliefs.append(beliefs.copy())
       
     # Find all dead ends in the maze
     numLegalNeighbors = util.Counter()
     possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-    self.deadEnds = util.Counter()
+    #self.teamData.deadEnds = util.Counter()
     frontier = []
     
     for p in legalPositions:
@@ -119,25 +133,25 @@ class GreatAgent(CaptureAgent):
       numNonDeadEndNeighbors = 0
       for dx, dy in possibleDeltas:
         neighbor = (cur[0] + dx, cur[1] + dy)
-        if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
+        if not gameState.hasWall(neighbor[0], neighbor[1]) and self.teamData.deadEnds[neighbor] == 0:
           numNonDeadEndNeighbors += 1
       if numNonDeadEndNeighbors == 1:
         self.increment(cur, util.Counter())
-        self.deadEnds[cur] = 1
+        self.teamData.deadEnds[cur] = 1
         for dx, dy in possibleDeltas:
           neighbor = (cur[0] + dx, cur[1] + dy)
-          if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
-            frontier.append(neighbor)
+          if not gameState.hasWall(neighbor[0], neighbor[1]) and self.teamData.deadEnds[neighbor] == 0:
+            frontier.append(neighbor)    
 
   def increment(self, position, alreadyVisited):
-    if self.deadEnds[position] > 0:
-      self.deadEnds[position] += 1
+    if self.teamData.deadEnds[position] > 0:
+      self.teamData.deadEnds[position] += 1
       alreadyVisited[position] = 1
     
     possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
     for dx, dy in possibleDeltas:
       neighbor = (position[0] + dx, position[1] + dy)
-      if self.deadEnds[neighbor] > 0 and alreadyVisited[neighbor] == 0:
+      if self.teamData.deadEnds[neighbor] > 0 and alreadyVisited[neighbor] == 0:
         self.increment(neighbor, alreadyVisited)
   """
   A base class for reflex agents that chooses score-maximizing actions
@@ -178,7 +192,7 @@ class GreatAgent(CaptureAgent):
     teamPositions = self.getTeamPositions(gameState)
     
     for i, position in enumerate(self.opponentPositions):
-      beliefs = self.opponentBeliefs[i]     
+      beliefs = self.teamData.opponentBeliefs[i]     
         
       # beliefs are re-initialized if pacman is captured
       if beliefs[beliefs.argMax()] == 0:
@@ -200,7 +214,7 @@ class GreatAgent(CaptureAgent):
               sum += oldBeliefs[prePos]
             beliefs[pos] += sum / len(previousPos) 
             beliefs[pos] *= distanceProb
-        self.opponentPositions[i] = beliefs.argMax()
+        self.teamData.opponentPositions[i] = beliefs.argMax()
       else:
             for pos in beliefs:
                 if beliefs[pos] > 0:
@@ -264,7 +278,7 @@ class GreatAgent(CaptureAgent):
     features['xRelativeToFriends'] = distances
     
     enemyX = 0.0
-    for epos in self.opponentPositions:
+    for epos in self.teamData.opponentPositions:
       if epos is not None:
         enemyX = enemyX + epos[0]
     features['avgEnemyX'] = distances
@@ -280,7 +294,7 @@ class GreatAgent(CaptureAgent):
     features['enemyPacmanNearMe'] = 0.0
     minOppDist = 10000
     minOppPos = (0, 0)
-    for ep in self.opponentPositions:
+    for ep in self.teamData.opponentPositions:
       # For a feature later on
       if ep is not None and self.getMazeDistance(ep, position) < minOppDist:
         minOppDist = self.getMazeDistance(ep, position)
@@ -331,7 +345,7 @@ class ExperimentalAgent(GreatAgent):
     
     threateningEnemyPositions = []
     opponentIndices = self.getOpponents(successor)
-    for i, position in enumerate(self.opponentPositions):
+    for i, position in enumerate(self.teamData.opponentPositions):
       opponentState = successor.getAgentState(opponentIndices[i])
       if not opponentState.isPacman:
         threateningEnemyPositions.append(position)
@@ -344,13 +358,14 @@ class ExperimentalAgent(GreatAgent):
           closestOpponentDistance = opponentDistance
       features['closestGhostDistanceInverse'] = 1.0 / (closestOpponentDistance + 1)
     
-    features['inADeadEndWithGhostNearby'] = self.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
+    features['inADeadEndWithGhostNearby'] = self.teamData.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
     
-    #if self.index == 1:
-     # print nextPosition
-     # print "Food Proximity:", foodScore
-     # print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
-     # print threateningEnemyPositions
+    if self.index == 1:
+      #print nextPosition
+      #print "Food Proximity:", foodScore
+      #print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
+      #print threateningEnemyPositions
+      #print self.teamData.opponentPositions
           
     return features
 
@@ -360,7 +375,7 @@ class ExperimentalAgent(GreatAgent):
     weights['foodProximity'] = 1
     weights['foodLeft'] = -5
     
-    weights['closestGhostDistanceInverse'] = -3
+    weights['closestGhostDistanceInverse'] = -5
 
     if successorState.getAgentState(self.index).isPacman:
       weights['inADeadEndWithGhostNearby'] = -1
@@ -420,7 +435,7 @@ class DefensiveGreatAgent(GreatAgent):
     # Computes distance to all invaders
     invaderPositions = []
     opponentIndices = self.getOpponents(successor)
-    for i, position in enumerate(self.opponentPositions):
+    for i, position in enumerate(self.teamData.opponentPositions):
       opponentState = successor.getAgentState(opponentIndices[i])
       if opponentState.isPacman:
         invaderPositions.append(position)
