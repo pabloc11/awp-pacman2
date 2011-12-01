@@ -360,7 +360,7 @@ class ExperimentalAgent(GreatAgent):
     
     features['inADeadEndWithGhostNearby'] = self.teamData.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
     
-    if self.index == 1:
+    #if self.index == 1:
       #print nextPosition
       #print "Food Proximity:", foodScore
       #print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
