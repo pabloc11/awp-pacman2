@@ -26,7 +26,7 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["experimental", "defense", "defense"]
+    self.agents = ["goal", "defense", "defense"]
     self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
@@ -38,6 +38,8 @@ class GreatAgents(AgentFactory):
       return DefensiveGreatAgent(index, self.teamData)
     elif agentStr == 'experimental':
       return ExperimentalAgent(index, self.teamData)
+    elif agentStr == 'goal':
+      return GoalBasedAgent(index, self.teamData)
     else:
       raise Exception("No staff agent identified by " + agentStr)
 
@@ -47,6 +49,7 @@ class TeamData:
     self.opponentBeliefs = []
     self.opponentPositions = []
     self.deadEnds = util.Counter()
+    self.goal = None
 
 ##########
 # Agents #
@@ -162,7 +165,6 @@ class GreatAgent(CaptureAgent):
       self.startingFood = len(self.getFoodYouAreDefending(gameState).asList())
       self.theirStartingFood = len(self.getFood(gameState).asList())
     
-
     self.updateBeliefs(gameState)
     
     """
@@ -327,6 +329,91 @@ class GreatAgent(CaptureAgent):
       if next_y < 0 or next_y == walls.height: continue
       if not walls.data[next_x][next_y]: neighbors.append((next_x, next_y))
     return neighbors
+
+class GoalBasedAgent(GreatAgent):
+  def chooseAction(self, gameState):
+    if not self.firstTurnComplete:
+      self.firstTurnComplete = True
+      self.startingFood = len(self.getFoodYouAreDefending(gameState).asList())
+      self.theirStartingFood = len(self.getFood(gameState).asList())
+    
+    self.updateBeliefs(gameState)
+    
+    self.threateningEnemyPositions = []
+    opponentIndices = self.getOpponents(gameState)
+    for i, position in enumerate(self.teamData.opponentPositions):
+      opponentState = gameState.getAgentState(opponentIndices[i])
+      if (not opponentState.isPacman) and (opponentState.scaredTimer == 0):
+        self.threateningEnemyPositions.append(position)
+
+    # if we don't have a goal or we have already reached our goal then pick a new one
+    if self.teamData.goal == None or self.getPosition(gameState) == self.teamData.goal:
+      self.pickNewGoal(gameState)
+    
+    nextAction = self.nextActionForGoal(gameState, self.teamData.goal)
+    
+    # if our current goal is going to get us killed pick a new goal
+    if self.actionWillGetYouEaten(gameState, nextAction):
+      self.pickNewGoal(gameState)
+      nextAction = self.nextActionForGoal(gameState, self.teamData.goal)
+    
+    return nextAction
+    
+  def nextActionForGoal(self, gameState, goal):
+    actions = gameState.getLegalActions(self.index)    
+    
+    values = []
+    for a in actions:
+      nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+      values.append(self.getMazeDistance(goal, nextPosition))
+    
+    minValue = min(values)
+    possibleActions = [a for a, v in zip(actions, values) if v == minValue]
+    
+    return self.pickActionFurthestFromEnemies(gameState, possibleActions)
+  
+  def actionWillGetYouEaten(self, gameState, action):
+    # update this to take dead-ends into account
+    nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    return self.distanceToClosestEnemy(gameState, nextPosition) < 10
+    
+  # returns the closest food that will not send you towards an enemy agent
+  # if it can't find one then just set the goal to run away from the closest enemy
+  def pickNewGoal(self, gameState):
+    currentPosition = self.getPosition(gameState)
+    remainingFoods = self.getFood(gameState).asList()
+    
+    # list of (distance to food, food location)
+    values = []
+    for food in remainingFoods:
+      values.append((self.getMazeDistance(currentPosition, food), food))
+    
+    values.sort(key=lambda x: x[0])
+    
+    for distance,food in values:
+      if (not self.actionWillGetYouEaten(gameState, self.nextActionForGoal(gameState, food))):
+        self.teamData.goal = food
+        return
+    
+    action = self.pickActionFurthestFromEnemies(gameState, gameState.getLegalActions(self.index))
+    self.teamData.goal = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    
+  def pickActionFurthestFromEnemies(self, gameState, possibleActions):
+    #list of (distanceToEnemy, action)
+    values = []
+    for action in possibleActions:
+      nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+      values.append((self.distanceToClosestEnemy(gameState, nextPosition),action))
+    values.sort(key=lambda x: x[0])
+    return values[0][1]
+  
+  def distanceToClosestEnemy(self, gameState, currentLocation):
+    values = []
+    for enemy in self.threateningEnemyPositions:
+      values.append(self.getMazeDistance(enemy, currentLocation))
+    if len(values) == 0:
+      return 10000
+    return min(values)
 
 class ExperimentalAgent(GreatAgent):
  
