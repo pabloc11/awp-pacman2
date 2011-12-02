@@ -345,6 +345,15 @@ class GoalBasedAgent(GreatAgent):
     
     self.updateBeliefs(gameState)
     
+    # check if you happen to be a ghost and adjacent to an enemy then eat him
+    actions = gameState.getLegalActions(self.index)
+    for a in actions:
+      nextAgentState = gameState.generateSuccessor(self.index, a).getAgentState(self.index)
+      if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+        nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+        if nextPosition in self.teamData.opponentPositions:
+          return a
+    
     self.threateningEnemyPositions = []
     opponentIndices = self.getOpponents(gameState)
     for i, position in enumerate(self.teamData.opponentPositions):
@@ -370,6 +379,9 @@ class GoalBasedAgent(GreatAgent):
     
     values = []
     for a in actions:
+      if a == Directions.STOP: 
+        values.append(10000) #don't stop
+        continue
       nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
       values.append(self.getMazeDistance(goal, nextPosition))
     
