@@ -26,7 +26,7 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["offense", "defense", "defense"]
+    self.agents = ["goal", "defense", "defense"]
     self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
@@ -362,7 +362,7 @@ class GoalBasedAgent(GreatAgent):
     if self.actionWillGetYouEaten(gameState, nextAction):
       self.pickNewGoal(gameState)
       nextAction = self.nextActionForGoal(gameState, self.teamData.goal)
-    
+
     return nextAction
     
   def nextActionForGoal(self, gameState, goal):
@@ -380,12 +380,24 @@ class GoalBasedAgent(GreatAgent):
   
   def actionWillGetYouEaten(self, gameState, action):
     # update this to take dead-ends into account
+    currentPosition = self.getPosition(gameState)
+    currentPositionDistance = self.distanceToClosestEnemy(gameState, currentPosition)
+    nextAgentState = gameState.generateSuccessor(self.index, action).getAgentState(self.index)
     nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
-    dist = self.distanceToClosestEnemy(gameState, nextPosition)
-    print self.threateningEnemyPositions
-    print gameState.getAgentPosition(self.index)
-    print dist
-    return dist < 7 
+    nextPositionDistance = self.distanceToClosestEnemy(gameState, nextPosition)
+    
+    # you won't get eaten if you are a ghost and not scared
+    if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+      return False
+    
+    # don't go into a dead-end if it's going to kill you
+    # disable this check to make the agent suicide for food in dead-ends
+    # perhaps adjust it dynamically based on how the game is going
+    if (currentPositionDistance - 1) < (2 * self.teamData.deadEnds[nextPosition]):
+      return True
+    
+    # adjust this to control how close the agent is willing to get to an enemy (min value is 2)
+    return nextPositionDistance < 4 and nextPositionDistance < currentPositionDistance 
     
   # returns the closest food that will not send you towards an enemy agent
   # if it can't find one then just set the goal to run away from the closest enemy
@@ -411,11 +423,25 @@ class GoalBasedAgent(GreatAgent):
   def pickActionFurthestFromEnemies(self, gameState, possibleActions):
     #list of (distanceToEnemy, action)
     values = []
+    currentPosition = gameState.getAgentPosition(self.index)
     for action in possibleActions:
       nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+      if action == Directions.STOP: 
+        values.append((-2,action)) #give stopping a negative value
+        continue
+      if self.teamData.deadEnds[nextPosition] > self.teamData.deadEnds[currentPosition]:
+        values.append((-1,action)) #give going further into a dead end a negative value, but not as negative as stopping
+        continue
+      nextAgentState = gameState.generateSuccessor(self.index, action).getAgentState(self.index)
+      if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+        values.append((10000,action)) # give a very high value to going back to safe side
+        continue
       values.append((self.distanceToClosestEnemy(gameState, nextPosition),action))
-    values.sort(key=lambda x: x[0])
-    return values[0][1]
+    
+    values.sort(key=lambda x: x[0], reverse=True)
+    maxDist = values[0][0]
+    possibleActions = [action for dist, action in values if dist == maxDist]
+    return random.choice(possibleActions)
   
   def distanceToClosestEnemy(self, gameState, currentLocation):
     values = []
