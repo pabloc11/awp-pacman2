@@ -314,6 +314,59 @@ class GreatAgent(CaptureAgent):
       if not walls.data[next_x][next_y]: neighbors.append((next_x, next_y))
     return neighbors
 
+  def getFuturePositionsInEnemyArea(self, position, step):
+      positions = []
+      for i in range(step):
+          neighbors = self.getLegalNeighbors(position, walls)
+          
+          
+  def buildTreeFuturePositionsInTeamArea(self, gameState, depth):
+      team = self.getTeam(gameState)
+      teamPositions = self.getTeamPositions(gameState)
+      positions = [[util.Counter() for i in range(len(team))] for j in range(depth)]
+      positionTree = util.Counter()
+      positionTreeNodeID = []
+      positionTreeMax = util.Counter()
+      
+      index = 0
+      for pos in teamPositions:
+          if self.isPositionInTeamTerritory(gameState, pos) == True:
+              positions[index][0][pos] = 0
+              index += 1
+      
+      if index > 1:
+          treeLevel = 0
+          for dep in range(depth-1):
+              for i in range(index):
+                  for pos in positions[i][dep]:
+                      for legalPos in self.getLegalNeighbors(pos, self.walls):
+                          positions[i][dep+1][legalPos] = 0                  
+                  self.addTreeNodes(positionTree, treeLevel, positions[i][dep+1])
+                  treeLevel += 1
+                  positionTreeNodeID.append(i)
+      
+      # find max distances at deepest nodes            
+      #for dep in range(index - 1):
+          
+                  
+      temp = 1
+      
+
+                  
+      
+                  
+                  
+  def addTreeNodes(self, tree, level, values):
+      y = 0
+      x = level
+      while tree.has_key((x, y)):
+        y += 1
+      for val in values:
+          x = level
+          tree[(x,y)] = val
+          y += 1
+
+
 class ExperimentalAgent(GreatAgent):
  
   def getFeatures(self, gameState, action):
@@ -351,6 +404,8 @@ class ExperimentalAgent(GreatAgent):
      # print "Food Proximity:", foodScore
      # print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
      # print threateningEnemyPositions
+     
+    self.buildTreeFuturePositionsInTeamArea(gameState, 3)  
           
     return features
 
@@ -387,6 +442,7 @@ class OffensiveGreatAgent(GreatAgent):
       myPos = successor.getAgentState(self.index).getPosition()
       minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
       features['distanceToFood'] = minDistance
+      
     return features
 
   def getWeights(self, gameState, action):
