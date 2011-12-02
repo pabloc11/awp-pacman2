@@ -26,7 +26,7 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["goal", "defense", "defense"]
+    self.agents = ["offense", "defense", "defense"]
     self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
@@ -46,6 +46,7 @@ class GreatAgents(AgentFactory):
 class TeamData:
   def __init__(self):
     self.initialized = False
+    self.legalPositions = []
     self.opponentBeliefs = []
     self.opponentPositions = []
     self.deadEnds = util.Counter()
@@ -89,8 +90,11 @@ class GreatAgent(CaptureAgent):
     # or uncomment this to forget maze distances and just use manhattan distances for this agent
     #self.distancer.useManhattanDistances()
     
-    self.walls = gameState.getWalls()
+    import __main__
+    if '_display' in dir(__main__):
+      self.display = __main__._display
     
+    self.walls = gameState.getWalls()
     
     if self.teamData.initialized == False:
       self.initializeTeamData(gameState)
@@ -102,16 +106,14 @@ class GreatAgent(CaptureAgent):
     width = self.getLayoutWidth(gameState)
     height = self.getLayoutHeight(gameState)
     beliefs = util.Counter()
-    legalPositions = []
     for i in range(0, width):
       for j in range(0, height):
         if gameState.hasWall(i,j) == False:
-          legalPositions.append((i,j))
+          self.teamData.legalPositions.append((i,j))
           beliefs[(i,j)] = 1
     beliefs.normalize()
                 
     # set up beliefs for each opponent agent
-    #self.teamData.opponentBeliefs = []
     self.teamData.opponentPositions = self.getOpponentPositions(gameState)
     
     for opponentIndex in self.getOpponents(gameState):
@@ -120,10 +122,9 @@ class GreatAgent(CaptureAgent):
     # Find all dead ends in the maze
     numLegalNeighbors = util.Counter()
     possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-    #self.teamData.deadEnds = util.Counter()
     frontier = []
     
-    for p in legalPositions:
+    for p in self.teamData.legalPositions:
       numLegalNeighbors[p] = 0
       for dx, dy in possibleDeltas:
         if not gameState.hasWall(p[0] + dx, p[1] + dy):
@@ -188,45 +189,49 @@ class GreatAgent(CaptureAgent):
     '''
     
     myPosition = self.getPosition(gameState)
-    self.opponentPositions = self.getOpponentPositions(gameState)
+    opponentPositions = self.getOpponentPositions(gameState)
     opponents = self.getOpponents(gameState)
     team = self.getTeam(gameState)
     teamPositions = self.getTeamPositions(gameState)
     
-    for i, position in enumerate(self.opponentPositions):
+    for i, position in enumerate(opponentPositions):
       beliefs = self.teamData.opponentBeliefs[i]     
         
       # beliefs are re-initialized if pacman is captured
       if beliefs[beliefs.argMax()] == 0:
-        beliefs.incrementAll(beliefs.keys(), 1)
+        for pos in self.teamData.legalPositions:
+          beliefs[pos] = 1
         beliefs.normalize()
           
       if position == None:
         oldBeliefs = beliefs.copy()
         noisyDistance = gameState.getAgentDistance(opponents[i])
-        for pos in beliefs:
+        for pos in self.teamData.legalPositions:
           trueDistance = util.manhattanDistance(myPosition, pos)
           distanceProb = gameState.getDistanceProb(trueDistance, noisyDistance)
           if distanceProb == 0:
             beliefs[pos] = 0
           else:
             sum = 0
-            previousPos = Actions.getLegalNeighbors(pos, self.walls)
+            if (self.index - 1 == opponents[i]) or ((self.index == 0) and (i + 1 == len(opponents))):
+              previousPos = Actions.getLegalNeighbors(pos, self.walls)
+            else:
+              previousPos = [pos]
             for prePos in previousPos:
               sum += oldBeliefs[prePos]
             beliefs[pos] += sum / len(previousPos) 
             beliefs[pos] *= distanceProb
         self.teamData.opponentPositions[i] = beliefs.argMax()
       else:
-            for pos in beliefs:
-                if beliefs[pos] > 0:
-                    beliefs[pos] = 0
-            beliefs[(position)] = 1
+        for pos in self.teamData.legalPositions:
+          if beliefs[pos] > 0:
+            beliefs[pos] = 0
+          beliefs[position] = 1
       beliefs.normalize()
     
     # print out opponents' positions (max prob)
     #if self.index == 0 or self.index == 1:
-    #  self.displayDistributionsOverPositions(self.opponentBeliefs)
+    self.displayDistributionsOverPositions(self.teamData.opponentBeliefs)
     #  for index, pos in enumerate(self.opponentPositions):
     #    print opponents[index], pos, self.opponentBeliefs[index]
 
@@ -375,7 +380,7 @@ class GoalBasedAgent(GreatAgent):
   def actionWillGetYouEaten(self, gameState, action):
     # update this to take dead-ends into account
     nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
-    return self.distanceToClosestEnemy(gameState, nextPosition) < 10
+    return self.distanceToClosestEnemy(gameState, nextPosition) < 6
     
   # returns the closest food that will not send you towards an enemy agent
   # if it can't find one then just set the goal to run away from the closest enemy
