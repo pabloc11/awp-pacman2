@@ -213,6 +213,7 @@ class GreatAgent(CaptureAgent):
             beliefs[pos] = 0
           else:
             sum = 0
+            # only account for an enemy moving when it actually moves, not every time you make an observation
             if (self.index - 1 == opponents[i]) or ((self.index == 0) and (i + 1 == len(opponents))):
               previousPos = Actions.getLegalNeighbors(pos, self.walls)
             else:
@@ -221,13 +222,13 @@ class GreatAgent(CaptureAgent):
               sum += oldBeliefs[prePos]
             beliefs[pos] += sum / len(previousPos) 
             beliefs[pos] *= distanceProb
-        self.teamData.opponentPositions[i] = beliefs.argMax()
       else:
+        beliefs.clear()
         for pos in self.teamData.legalPositions:
-          if beliefs[pos] > 0:
-            beliefs[pos] = 0
-          beliefs[position] = 1
+          beliefs[pos] = 0
+        beliefs[position] = 1
       beliefs.normalize()
+      self.teamData.opponentPositions[i] = beliefs.argMax()
     
     # print out opponents' positions (max prob)
     #if self.index == 0 or self.index == 1:
@@ -380,7 +381,11 @@ class GoalBasedAgent(GreatAgent):
   def actionWillGetYouEaten(self, gameState, action):
     # update this to take dead-ends into account
     nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
-    return self.distanceToClosestEnemy(gameState, nextPosition) < 6
+    dist = self.distanceToClosestEnemy(gameState, nextPosition)
+    print self.threateningEnemyPositions
+    print gameState.getAgentPosition(self.index)
+    print dist
+    return dist < 7 
     
   # returns the closest food that will not send you towards an enemy agent
   # if it can't find one then just set the goal to run away from the closest enemy
