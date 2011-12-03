@@ -16,6 +16,7 @@ import game
 from util import nearestPoint
 import regularMutation
 from game import Actions
+import copy
 
 #############
 # FACTORIES #
@@ -26,31 +27,52 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["experimental", "defense", "defense"]
-  
+    self.agents = ["goal", "goal", "goal"]
+    self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
 
   def choose(self, agentStr, index):
     if agentStr == 'offense':
-      return OffensiveGreatAgent(index)
+      self.teamData.team.append('offense')  
+      return OffensiveGreatAgent(index, self.teamData)
     elif agentStr == 'defense':
-      return DefensiveGreatAgent(index)
+      self.teamData.team.append('defense')  
+      return DefensiveGreatAgent(index, self.teamData)
     elif agentStr == 'experimental':
-      return ExperimentalAgent(index)
+      self.teamData.team.append('experimental')
+      return ExperimentalAgent(index, self.teamData)
+    elif agentStr == 'goal':
+      self.teamData.team.append('goal')  
+      return GoalBasedAgent(index, self.teamData)
     else:
       raise Exception("No staff agent identified by " + agentStr)
+
+class TeamData:
+  def __init__(self):
+    self.initialized = False
+    self.team = []
+    self.offenseAgents = []
+    self.defenseAgents = []
+    self.legalPositions = []
+    self.opponentBeliefs = []
+    self.opponentPositions = []
+    self.deadEnds = util.Counter()
+    self.goal = [None,None,None]
+    self.canSuicide = [False, False, False]
+    self.globalSuicide = False
 
 ##########
 # Agents #
 ##########
 
 class GreatAgent(CaptureAgent):
-  def __init__(self, index):
+  def __init__(self, index, teamData):
     CaptureAgent.__init__(self, index)
     self.firstTurnComplete = False
     self.startingFood = 0
     self.theirStartingFood = 0
+    self.teamData = teamData
   
   def registerInitialState(self, gameState):
     """
@@ -78,35 +100,49 @@ class GreatAgent(CaptureAgent):
     # or uncomment this to forget maze distances and just use manhattan distances for this agent
     #self.distancer.useManhattanDistances()
     
+    import __main__
+    if '_display' in dir(__main__):
+      self.display = __main__._display
+    
     self.walls = gameState.getWalls()
     
-    
+    if self.teamData.initialized == False:
+      self.initializeTeamData(gameState)
+      self.teamData.initialized = True
+
+    for i, j in enumerate(self.getTeam(gameState)):
+        if self.index == j:
+            if self.teamData.team[i] == 'defense':
+                self.teamData.defenseAgents.append(j)
+                self.agentType = 'defense'
+            elif self.teamData.team[i] == 'offense':
+                self.teamData.offenseAgents.append(j)
+                self.agentType = 'offense'
+  
+  def initializeTeamData(self, gameState):
     # Find all possible legal positions
     width = self.getLayoutWidth(gameState)
     height = self.getLayoutHeight(gameState)
     beliefs = util.Counter()
-    legalPositions = []
     for i in range(0, width):
       for j in range(0, height):
         if gameState.hasWall(i,j) == False:
-          legalPositions.append((i,j))
+          self.teamData.legalPositions.append((i,j))
           beliefs[(i,j)] = 1
     beliefs.normalize()
                 
     # set up beliefs for each opponent agent
-    self.opponentBeliefs = []
-    self.opponentPositions = self.getOpponentPositions(gameState)
+    self.teamData.opponentPositions = self.getOpponentPositions(gameState)
     
     for opponentIndex in self.getOpponents(gameState):
-      self.opponentBeliefs.append(beliefs.copy())
+      self.teamData.opponentBeliefs.append(beliefs.copy())
       
     # Find all dead ends in the maze
     numLegalNeighbors = util.Counter()
     possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-    self.deadEnds = util.Counter()
     frontier = []
     
-    for p in legalPositions:
+    for p in self.teamData.legalPositions:
       numLegalNeighbors[p] = 0
       for dx, dy in possibleDeltas:
         if not gameState.hasWall(p[0] + dx, p[1] + dy):
@@ -119,25 +155,25 @@ class GreatAgent(CaptureAgent):
       numNonDeadEndNeighbors = 0
       for dx, dy in possibleDeltas:
         neighbor = (cur[0] + dx, cur[1] + dy)
-        if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
+        if not gameState.hasWall(neighbor[0], neighbor[1]) and self.teamData.deadEnds[neighbor] == 0:
           numNonDeadEndNeighbors += 1
       if numNonDeadEndNeighbors == 1:
         self.increment(cur, util.Counter())
-        self.deadEnds[cur] = 1
+        self.teamData.deadEnds[cur] = 1
         for dx, dy in possibleDeltas:
           neighbor = (cur[0] + dx, cur[1] + dy)
-          if not gameState.hasWall(neighbor[0], neighbor[1]) and self.deadEnds[neighbor] == 0:
-            frontier.append(neighbor)
+          if not gameState.hasWall(neighbor[0], neighbor[1]) and self.teamData.deadEnds[neighbor] == 0:
+            frontier.append(neighbor)    
 
   def increment(self, position, alreadyVisited):
-    if self.deadEnds[position] > 0:
-      self.deadEnds[position] += 1
+    if self.teamData.deadEnds[position] > 0:
+      self.teamData.deadEnds[position] += 1
       alreadyVisited[position] = 1
     
     possibleDeltas = [(0, 1), (0, -1), (1, 0), (-1, 0)]
     for dx, dy in possibleDeltas:
       neighbor = (position[0] + dx, position[1] + dy)
-      if self.deadEnds[neighbor] > 0 and alreadyVisited[neighbor] == 0:
+      if self.teamData.deadEnds[neighbor] > 0 and alreadyVisited[neighbor] == 0:
         self.increment(neighbor, alreadyVisited)
   """
   A base class for reflex agents that chooses score-maximizing actions
@@ -148,7 +184,6 @@ class GreatAgent(CaptureAgent):
       self.startingFood = len(self.getFoodYouAreDefending(gameState).asList())
       self.theirStartingFood = len(self.getFood(gameState).asList())
     
-
     self.updateBeliefs(gameState)
     
     """
@@ -172,47 +207,48 @@ class GreatAgent(CaptureAgent):
     '''
     
     myPosition = self.getPosition(gameState)
-    self.opponentPositions = self.getOpponentPositions(gameState)
+    opponentPositions = self.getOpponentPositions(gameState)
     opponents = self.getOpponents(gameState)
     team = self.getTeam(gameState)
     teamPositions = self.getTeamPositions(gameState)
     
-    for i, position in enumerate(self.opponentPositions):
-      beliefs = self.opponentBeliefs[i]     
+    for i, position in enumerate(opponentPositions):
+      beliefs = self.teamData.opponentBeliefs[i]     
         
       # beliefs are re-initialized if pacman is captured
       if beliefs[beliefs.argMax()] == 0:
-        beliefs.incrementAll(beliefs.keys(), 1)
+        for pos in self.teamData.legalPositions:
+          beliefs[pos] = 1
         beliefs.normalize()
           
       if position == None:
         oldBeliefs = beliefs.copy()
         noisyDistance = gameState.getAgentDistance(opponents[i])
-        for pos in beliefs:
+        for pos in self.teamData.legalPositions:
           trueDistance = util.manhattanDistance(myPosition, pos)
           distanceProb = gameState.getDistanceProb(trueDistance, noisyDistance)
           if distanceProb == 0:
             beliefs[pos] = 0
           else:
             sum = 0
-            previousPos = Actions.getLegalNeighbors(pos, self.walls)
+            # only account for an enemy moving when it actually moves, not every time you make an observation
+            if (self.index - 1 == opponents[i]) or ((self.index == 0) and (i + 1 == len(opponents))):
+              previousPos = Actions.getLegalNeighbors(pos, self.walls)
+            else:
+              previousPos = [pos]
             for prePos in previousPos:
               sum += oldBeliefs[prePos]
             beliefs[pos] += sum / len(previousPos) 
             beliefs[pos] *= distanceProb
-        self.opponentPositions[i] = beliefs.argMax()
       else:
-            for pos in beliefs:
-                if beliefs[pos] > 0:
-                    beliefs[pos] = 0
-            beliefs[(position)] = 1
+        beliefs.clear()
+        for pos in self.teamData.legalPositions:
+          beliefs[pos] = 0
+        beliefs[position] = 1
       beliefs.normalize()
+      self.teamData.opponentPositions[i] = beliefs.argMax()
     
-    # print out opponents' positions (max prob)
-    #if self.index == 0 or self.index == 1:
-    #  self.displayDistributionsOverPositions(self.opponentBeliefs)
-    #  for index, pos in enumerate(self.opponentPositions):
-    #    print opponents[index], pos, self.opponentBeliefs[index]
+    self.displayDistributionsOverPositions(self.teamData.opponentBeliefs)
 
   def getSuccessor(self, gameState, action):
     """
@@ -264,7 +300,7 @@ class GreatAgent(CaptureAgent):
     features['xRelativeToFriends'] = distances
     
     enemyX = 0.0
-    for epos in self.opponentPositions:
+    for epos in self.teamData.opponentPositions:
       if epos is not None:
         enemyX = enemyX + epos[0]
     features['avgEnemyX'] = distances
@@ -280,7 +316,7 @@ class GreatAgent(CaptureAgent):
     features['enemyPacmanNearMe'] = 0.0
     minOppDist = 10000
     minOppPos = (0, 0)
-    for ep in self.opponentPositions:
+    for ep in self.teamData.opponentPositions:
       # For a feature later on
       if ep is not None and self.getMazeDistance(ep, position) < minOppDist:
         minOppDist = self.getMazeDistance(ep, position)
@@ -314,22 +350,46 @@ class GreatAgent(CaptureAgent):
       if not walls.data[next_x][next_y]: neighbors.append((next_x, next_y))
     return neighbors
 
-  def getFuturePositionsInEnemyArea(self, position, step):
-      positions = []
-      for i in range(step):
-          neighbors = self.getLegalNeighbors(position, walls)
+  def getNextPosition(self, gameState, position, action):
+      x,y = position
+      x, y = int(x), int(y)
+      if action == 'Stop':
+          return position
+      elif action == 'North':
+          y += 1
+      elif action == 'South':
+          y -= 1
+      elif action == 'East':
+          x += 1
+      elif action == 'West':
+          x -= 1
+    
+      if gameState.hasWall(x,y) == False:
+          position = (x,y)
           
-          
-  def buildTreeFuturePositionsInTeamArea(self, gameState, depth):
+      return position
+      
+
+  def getFutureAgentsDistance(self, gameState, agents, actions, depth):
+      '''
+      find max distance of two agents in number of future steps (depth) 
+      '''
       team = self.getTeam(gameState)
       teamPositions = self.getTeamPositions(gameState)
-      positions = [[util.Counter() for i in range(len(team))] for j in range(depth)]
+      positions = [[util.Counter() for i in range(depth)] for j in range(2)]
       positionTree = util.Counter()
       positionTreeNodeID = []
       positionTreeMax = util.Counter()
       
+      agentsPositions = []
+      for i in range(2):
+          for j, k in enumerate(team):
+              if agents[i] == k:
+                agentsPositions.append(teamPositions[j])
+      
       index = 0
-      for pos in teamPositions:
+      for i in range(2):
+          pos = self.getNextPosition(gameState, agentsPositions[i], actions[i])
           if self.isPositionInTeamTerritory(gameState, pos) == True:
               positions[index][0][pos] = 0
               index += 1
@@ -346,15 +406,32 @@ class GreatAgent(CaptureAgent):
                   positionTreeNodeID.append(i)
       
       # find max distances at deepest nodes            
-      #for dep in range(index - 1):
-          
-                  
-      temp = 1
+      max = 0
+      maxPos = []
+      for pos1 in positions[0][depth-1]:
+          for pos2 in positions[1][depth-1]:
+              #distance = util.manhattanDistance(pos1, pos2) 
+              distance = self.getMazeDistance(pos1, pos2) 
+              if distance > max:
+                  max = distance
+      #maxPos.append(pos1)
+      #maxPos.append(pos2)
       
-
-                  
+      '''        
+      maxDeepPos = copy.copy(maxPos)        
+      # find the next positions that lead to max distance
+      for i in range(2):
+          for j in range(depth-2):
+              for pos in positions[i][depth-2-j]:
+                  nextLegalPos = Actions.getLegalNeighbors(pos, self.walls)
+                  for nextPos in nextLegalPos:
+                      if nextPos == maxPos[i]:
+                          maxPos[i] = pos
+                          break
+      '''
       
-                  
+      return max
+      
                   
   def addTreeNodes(self, tree, level, values):
       y = 0
@@ -366,6 +443,172 @@ class GreatAgent(CaptureAgent):
           tree[(x,y)] = val
           y += 1
 
+
+class GoalBasedAgent(GreatAgent):
+  def chooseAction(self, gameState):
+    if not self.firstTurnComplete:
+      self.firstTurnComplete = True
+      self.startingFood = len(self.getFoodYouAreDefending(gameState).asList())
+      self.theirStartingFood = len(self.getFood(gameState).asList())
+    
+    self.updateBeliefs(gameState)
+    
+    if len(self.getFood(gameState).asList()) <= 6:
+      self.teamData.globalSuicide = True
+      self.teamData.canSuicide = [True, True, True]
+    
+    # check if you happen to be a ghost and adjacent to an enemy then eat him
+    actions = gameState.getLegalActions(self.index)
+    for a in actions:
+      nextAgentState = gameState.generateSuccessor(self.index, a).getAgentState(self.index)
+      if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+        nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+        if nextPosition in self.teamData.opponentPositions:
+          return a
+    
+    self.threateningEnemyPositions = []
+    opponentIndices = self.getOpponents(gameState)
+    for i, position in enumerate(self.teamData.opponentPositions):
+      opponentState = gameState.getAgentState(opponentIndices[i])
+      if (not opponentState.isPacman) and (opponentState.scaredTimer == 0):
+        self.threateningEnemyPositions.append(position)
+
+    # if we don't have a goal or we have already reached our goal then pick a new one
+    if self.teamData.goal[self.index / 2] == None or self.getPosition(gameState) == self.teamData.goal[self.index / 2]:
+      self.pickNewGoal(gameState)
+    
+    nextAction = self.nextActionForGoal(gameState, self.teamData.goal[self.index / 2])
+    
+    # if our current goal is going to get us killed pick a new goal
+    if self.actionWillGetYouEaten(gameState, nextAction):
+      self.pickNewGoal(gameState)
+      nextAction = self.nextActionForGoal(gameState, self.teamData.goal[self.index / 2])
+
+    return nextAction
+    
+  def nextActionForGoal(self, gameState, goal):
+    actions = gameState.getLegalActions(self.index)    
+    
+    values = []
+    for a in actions:
+      if a == Directions.STOP: 
+        values.append(10000) #don't stop
+        continue
+      nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+      values.append(self.getMazeDistance(goal, nextPosition))
+    
+    minValue = min(values)
+    possibleActions = [a for a, v in zip(actions, values) if v == minValue]
+    
+    return self.pickActionFurthestFromEnemies(gameState, possibleActions)
+  
+  def actionWillGetYouEaten(self, gameState, action):
+    # update this to take dead-ends into account
+    currentPosition = self.getPosition(gameState)
+    currentPositionDistance = self.distanceToClosestEnemy(gameState, currentPosition)
+    nextAgentState = gameState.generateSuccessor(self.index, action).getAgentState(self.index)
+    nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    nextPositionDistance = self.distanceToClosestEnemy(gameState, nextPosition)
+    
+    # you won't get eaten if you are a ghost and not scared
+    if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+      return False
+    
+    # don't go into a dead-end if it's going to kill you unless the suicide flag is on
+    if not (self.teamData.canSuicide[self.index / 2]):
+      goalDistance = self.getMazeDistance(currentPosition, self.teamData.goal[self.index / 2])
+      goalDeadEndValue = self.teamData.deadEnds[self.teamData.goal[self.index / 2]]
+      if (self.teamData.deadEnds[nextPosition] > 0) and ((currentPositionDistance - 1) < (goalDistance + goalDeadEndValue)):
+        return True
+    
+    # adjust this to control how close the agent is willing to get to an enemy (min value is 2)
+    return nextPositionDistance < 2 and nextPositionDistance < currentPositionDistance 
+    
+  # returns the closest food that will not send you towards an enemy agent
+  # if it can't find one then just set the goal to run away from the closest enemy
+  def pickNewGoal(self, gameState):
+    currentPosition = self.getPosition(gameState)
+    remainingFoods = self.getFood(gameState).asList()
+    
+    # list of (distance to food, food location, goalImpossibility)
+    values = []
+    onlyImpossibleGoalsLeft = True
+    for food in remainingFoods:
+      # don't pick the same goal as another agent
+      if not (food in self.teamData.goal):
+        thisGoalisImpossible = self.goalIsImpossible(food, currentPosition, self.distanceToClosestEnemy(gameState, currentPosition))
+        values.append((self.getMazeDistance(currentPosition, food), food, thisGoalisImpossible))
+        if not thisGoalisImpossible:
+          onlyImpossibleGoalsLeft = False
+    
+    # there are feasible goals left and we aren't in suicide mode then remove all impossible goals
+    if (not onlyImpossibleGoalsLeft) and (not self.teamData.globalSuicide):
+      newValues = []
+      for dist, location, impossible in values:
+        if not impossible:
+          newValues.append((dist,location,impossible))
+      values = newValues
+      
+    
+    # disable suiciding in case it was previously on
+    if not self.teamData.globalSuicide:
+      self.teamData.canSuicide[self.index / 2] = False
+    
+    # enable temporary suiciding if only impossible goals left
+    if onlyImpossibleGoalsLeft:
+      self.teamData.canSuicide[self.index / 2] = True
+    
+    values.sort(key=lambda x: x[0])
+    
+    for distance,food,impossible in values:
+      if (not self.actionWillGetYouEaten(gameState, self.nextActionForGoal(gameState, food))):
+        self.teamData.goal[self.index / 2] = food
+        return
+    
+    # if no good goal was found just run away
+    action = self.pickActionFurthestFromEnemies(gameState, gameState.getLegalActions(self.index))
+    self.teamData.goal[self.index / 2] = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+  
+  def goalIsImpossible(self, goal, currentPosition, enemyDistance):
+    distanceToGoal = self.getMazeDistance(goal, currentPosition)
+    goalDeadEndValue = self.teamData.deadEnds[goal]
+    
+    if distanceToGoal < goalDeadEndValue: # already in the dead-end near the goal
+      escapingDistance = distanceToGoal + goalDeadEndValue
+    else :
+      escapingDistance = 2 * goalDeadEndValue
+      
+    return (enemyDistance - 1) < escapingDistance
+  def pickActionFurthestFromEnemies(self, gameState, possibleActions):
+    #list of (distanceToEnemy, action)
+    values = []
+    currentPosition = gameState.getAgentPosition(self.index)
+    for action in possibleActions:
+      nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+      if action == Directions.STOP: 
+        values.append((-2,action)) #give stopping a negative value
+        continue
+      if self.teamData.deadEnds[nextPosition] > self.teamData.deadEnds[currentPosition]:
+        values.append((-1,action)) #give going further into a dead end a negative value, but not as negative as stopping
+        continue
+      nextAgentState = gameState.generateSuccessor(self.index, action).getAgentState(self.index)
+      if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
+        values.append((10000,action)) # give a very high value to going back to safe side
+        continue
+      values.append((self.distanceToClosestEnemy(gameState, nextPosition),action))
+    
+    values.sort(key=lambda x: x[0], reverse=True)
+    maxDist = values[0][0]
+    possibleActions = [action for dist, action in values if dist == maxDist]
+    return random.choice(possibleActions)
+  
+  def distanceToClosestEnemy(self, gameState, currentLocation):
+    values = []
+    for enemy in self.threateningEnemyPositions:
+      values.append(self.getMazeDistance(enemy, currentLocation))
+    if len(values) == 0:
+      return 10000
+    return min(values)
 
 class ExperimentalAgent(GreatAgent):
  
@@ -384,7 +627,7 @@ class ExperimentalAgent(GreatAgent):
     
     threateningEnemyPositions = []
     opponentIndices = self.getOpponents(successor)
-    for i, position in enumerate(self.opponentPositions):
+    for i, position in enumerate(self.teamData.opponentPositions):
       opponentState = successor.getAgentState(opponentIndices[i])
       if not opponentState.isPacman:
         threateningEnemyPositions.append(position)
@@ -397,15 +640,14 @@ class ExperimentalAgent(GreatAgent):
           closestOpponentDistance = opponentDistance
       features['closestGhostDistanceInverse'] = 1.0 / (closestOpponentDistance + 1)
     
-    features['inADeadEndWithGhostNearby'] = self.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
+    features['inADeadEndWithGhostNearby'] = self.teamData.deadEnds[nextPosition] * features['closestGhostDistanceInverse']
     
     #if self.index == 1:
-     # print nextPosition
-     # print "Food Proximity:", foodScore
-     # print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
-     # print threateningEnemyPositions
-     
-    self.buildTreeFuturePositionsInTeamArea(gameState, 3)  
+      #print nextPosition
+      #print "Food Proximity:", foodScore
+      #print "closestGhostDistanceInverse", features['closestGhostDistanceInverse']
+      #print threateningEnemyPositions
+      #print self.teamData.opponentPositions
           
     return features
 
@@ -415,7 +657,7 @@ class ExperimentalAgent(GreatAgent):
     weights['foodProximity'] = 1
     weights['foodLeft'] = -5
     
-    weights['closestGhostDistanceInverse'] = -3
+    weights['closestGhostDistanceInverse'] = -5
 
     if successorState.getAgentState(self.index).isPacman:
       weights['inADeadEndWithGhostNearby'] = -1
@@ -442,7 +684,6 @@ class OffensiveGreatAgent(GreatAgent):
       myPos = successor.getAgentState(self.index).getPosition()
       minDistance = min([self.getMazeDistance(myPos, food) for food in foodList])
       features['distanceToFood'] = minDistance
-      
     return features
 
   def getWeights(self, gameState, action):
@@ -476,7 +717,7 @@ class DefensiveGreatAgent(GreatAgent):
     # Computes distance to all invaders
     invaderPositions = []
     opponentIndices = self.getOpponents(successor)
-    for i, position in enumerate(self.opponentPositions):
+    for i, position in enumerate(self.teamData.opponentPositions):
       opponentState = successor.getAgentState(opponentIndices[i])
       if opponentState.isPacman:
         invaderPositions.append(position)
@@ -496,6 +737,25 @@ class DefensiveGreatAgent(GreatAgent):
       distance = distance + self.getMazeDistance(myPos, food)
     features['totalDistancesToFood'] = distance
 
+    '''
+    agentsInternalIndex = []
+    for i, j in enumerate(self.getTeam(gameState)):
+        if self.teamData.team[i] == 'defense':
+            agentsInternalIndex.append(i)
+    '''
+            
+    if len(self.teamData.defenseAgents) == 2 and self.agentType != 'offense':
+        if self.index == self.teamData.defenseAgents[0]:
+            actions = [action, 'Stop']
+        else:
+            actions = ['Stop', action]
+        
+        # find the max possible distance between two agent after number of steps
+        step = 3
+        distance = self.getFutureAgentsDistance(gameState, self.teamData.defenseAgents, actions, step)
+        features['friendsDistance'] = distance
+    
+
     return features
 
   def getWeights(self, gameState, action):
@@ -506,6 +766,8 @@ class DefensiveGreatAgent(GreatAgent):
     weights['totalDistancesToFood'] = -0.1
     weights['stop'] = -1
     weights['reverse'] = -1
+    if len(self.teamData.defenseAgents) == 2 and self.agentType != 'offense':
+        weights['friendsDistance'] = 0.3
     return weights
 
 
