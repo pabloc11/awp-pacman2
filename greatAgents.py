@@ -26,7 +26,7 @@ class GreatAgents(AgentFactory):
   
   def __init__(self, isRed, **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["goal", "defense", "defense"]
+    self.agents = ["goal", "goal", "goal"]
     self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)
@@ -50,7 +50,9 @@ class TeamData:
     self.opponentBeliefs = []
     self.opponentPositions = []
     self.deadEnds = util.Counter()
-    self.goal = None
+    self.goal = [None,None,None]
+    self.canSuicide = [False, False, False]
+    self.globalSuicide = False
 
 ##########
 # Agents #
@@ -345,6 +347,10 @@ class GoalBasedAgent(GreatAgent):
     
     self.updateBeliefs(gameState)
     
+    if len(self.getFood(gameState).asList()) <= 6:
+      self.teamData.globalSuicide = True
+      self.teamData.canSuicide = [True, True, True]
+    
     # check if you happen to be a ghost and adjacent to an enemy then eat him
     actions = gameState.getLegalActions(self.index)
     for a in actions:
@@ -362,15 +368,15 @@ class GoalBasedAgent(GreatAgent):
         self.threateningEnemyPositions.append(position)
 
     # if we don't have a goal or we have already reached our goal then pick a new one
-    if self.teamData.goal == None or self.getPosition(gameState) == self.teamData.goal:
+    if self.teamData.goal[self.index / 2] == None or self.getPosition(gameState) == self.teamData.goal[self.index / 2]:
       self.pickNewGoal(gameState)
     
-    nextAction = self.nextActionForGoal(gameState, self.teamData.goal)
+    nextAction = self.nextActionForGoal(gameState, self.teamData.goal[self.index / 2])
     
     # if our current goal is going to get us killed pick a new goal
     if self.actionWillGetYouEaten(gameState, nextAction):
       self.pickNewGoal(gameState)
-      nextAction = self.nextActionForGoal(gameState, self.teamData.goal)
+      nextAction = self.nextActionForGoal(gameState, self.teamData.goal[self.index / 2])
 
     return nextAction
     
@@ -402,14 +408,15 @@ class GoalBasedAgent(GreatAgent):
     if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
       return False
     
-    # don't go into a dead-end if it's going to kill you
-    # disable this check to make the agent suicide for food in dead-ends
-    # perhaps adjust it dynamically based on how the game is going
-    if (currentPositionDistance - 1) < (2 * self.teamData.deadEnds[nextPosition]):
-      return True
+    # don't go into a dead-end if it's going to kill you unless the suicide flag is on
+    if not (self.teamData.canSuicide[self.index / 2]):
+      goalDistance = self.getMazeDistance(currentPosition, self.teamData.goal[self.index / 2])
+      goalDeadEndValue = self.teamData.deadEnds[self.teamData.goal[self.index / 2]]
+      if (self.teamData.deadEnds[nextPosition] > 0) and ((currentPositionDistance - 1) < (goalDistance + goalDeadEndValue)):
+        return True
     
     # adjust this to control how close the agent is willing to get to an enemy (min value is 2)
-    return nextPositionDistance < 4 and nextPositionDistance < currentPositionDistance 
+    return nextPositionDistance < 2 and nextPositionDistance < currentPositionDistance 
     
   # returns the closest food that will not send you towards an enemy agent
   # if it can't find one then just set the goal to run away from the closest enemy
@@ -417,21 +424,55 @@ class GoalBasedAgent(GreatAgent):
     currentPosition = self.getPosition(gameState)
     remainingFoods = self.getFood(gameState).asList()
     
-    # list of (distance to food, food location)
+    # list of (distance to food, food location, goalImpossibility)
     values = []
+    onlyImpossibleGoalsLeft = True
     for food in remainingFoods:
-      values.append((self.getMazeDistance(currentPosition, food), food))
+      # don't pick the same goal as another agent
+      if not (food in self.teamData.goal):
+        thisGoalisImpossible = self.goalIsImpossible(food, currentPosition, self.distanceToClosestEnemy(gameState, currentPosition))
+        values.append((self.getMazeDistance(currentPosition, food), food, thisGoalisImpossible))
+        if not thisGoalisImpossible:
+          onlyImpossibleGoalsLeft = False
+    
+    # there are feasible goals left and we aren't in suicide mode then remove all impossible goals
+    if (not onlyImpossibleGoalsLeft) and (not self.teamData.globalSuicide):
+      newValues = []
+      for dist, location, impossible in values:
+        if not impossible:
+          newValues.append((dist,location,impossible))
+      values = newValues
+      
+    
+    # disable suiciding in case it was previously on
+    if not self.teamData.globalSuicide:
+      self.teamData.canSuicide[self.index / 2] = False
+    
+    # enable temporary suiciding if only impossible goals left
+    if onlyImpossibleGoalsLeft:
+      self.teamData.canSuicide[self.index / 2] = True
     
     values.sort(key=lambda x: x[0])
     
-    for distance,food in values:
+    for distance,food,impossible in values:
       if (not self.actionWillGetYouEaten(gameState, self.nextActionForGoal(gameState, food))):
-        self.teamData.goal = food
+        self.teamData.goal[self.index / 2] = food
         return
     
+    # if no good goal was found just run away
     action = self.pickActionFurthestFromEnemies(gameState, gameState.getLegalActions(self.index))
-    self.teamData.goal = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    self.teamData.goal[self.index / 2] = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+  
+  def goalIsImpossible(self, goal, currentPosition, enemyDistance):
+    distanceToGoal = self.getMazeDistance(goal, currentPosition)
+    goalDeadEndValue = self.teamData.deadEnds[goal]
     
+    if distanceToGoal < goalDeadEndValue: # already in the dead-end near the goal
+      escapingDistance = distanceToGoal + goalDeadEndValue
+    else :
+      escapingDistance = 2 * goalDeadEndValue
+      
+    return (enemyDistance - 1) < escapingDistance
   def pickActionFurthestFromEnemies(self, gameState, possibleActions):
     #list of (distanceToEnemy, action)
     values = []
