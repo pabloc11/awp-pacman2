@@ -17,6 +17,7 @@ from util import nearestPoint
 import regularMutation
 from game import Actions
 import copy
+from copy import deepcopy
 
 #############
 # FACTORIES #
@@ -248,34 +249,143 @@ class GreatAgent(CaptureAgent):
       beliefs.normalize()
       self.teamData.opponentPositions[i] = beliefs.argMax()
     
-    self.displayDistributionsOverPositions(self.teamData.opponentBeliefs)
+    #self.displayDistributionsOverPositions(self.teamData.opponentBeliefs)
 
-  def getSuccessor(self, gameState, action):
+  def getSuccessor(self, index, gameState, action):
     """
     Finds the next successor which is a grid position (location tuple).
     """
-    successor = gameState.generateSuccessor(self.index, action)
-    pos = successor.getAgentState(self.index).getPosition()
-    if pos != nearestPoint(pos):
-      # Only half a grid position was covered
-      return successor.generateSuccessor(self.index, action)
-    else:
-      return successor
+    team = self.getTeam(gameState)
+    for agent in team:
+        if index == agent:
+            temp = gameState.generateSuccessor(self.index, action)
+            successor = temp.deepCopy()
+            successor.data.agentStates = copy.deepcopy(temp.data.agentStates)
+            pos = successor.getAgentState(self.index).getPosition()
+            
+            if pos != nearestPoint(pos):
+                # Only half a grid position was covered
+                return successor.generateSuccessor(self.index, action)
+            else:
+                return successor            
 
+    successor = gameState.deepCopy()
+    successor.data.agentStates = copy.deepcopy(gameState.data.agentStates)
+    #successor.data.agentStates = gameState.copyAgentStates(successor.data.agentStates)
+    position = self.getNextPosition(successor, successor.data.agentStates[index].configuration.pos, action)
+    successor.data.agentStates[index].configuration.pos = position
+    
+    
+    foodList = self.getFoodYouAreDefending(gameState).asList()
+    for food in foodList:
+        if food == position:
+            x,y = position
+            successor.data.food[x][y] = False
+            successor.data.score += 1
+            successor.data.scoreChange = 1
+        
+    return successor
+    
+  
   def evaluate(self, gameState, action):
     """
     Computes a linear combination of features and feature weights
     """
+    depth = 3
+    
+    opponentPositions = self.getOpponentPositions(gameState)
+    opponents = self.getOpponents(gameState)
+    
+    # if opponents are observable, use MiniMax to determine next move
+    for i, pos in enumerate(opponentPositions):
+        if pos != None:
+            index = opponents[i]
+            
+            gameState1 = gameState.deepCopy()    
+            gameState1.data.agentStates[index].configuration = copy.copy(gameState1.data.agentStates[self.index].configuration)    
+            gameState1.data.agentStates[index].configuration.pos = pos
+            myTree = self.buildTree(self.index, gameState1, depth)
+            opponentTree = self.buildTree(index, gameState1, depth)
+            maxPos = self.miniMax(self.index, index, myTree, opponentTree, depth)
+        
     features = self.getFeatures(gameState, action)
     weights = self.getWeights(gameState, action)
+    
     return features * weights
+
+  def miniMax(self, maxIndex, minIndex, maxTree, minTree, depth):
+    '''
+    MiniMax search on the combined tree with max for first row and min
+    for the last row.  Retur
+    '''
+     
+    maxPos = maxTree[0][0].data.agentStates[maxIndex].configuration.pos
+    for i in range(depth-1):
+        min, max = 10000, 0 
+        # find the min position for the opponent
+        for j in range(len(minTree[depth-i-1])):
+            gameState = minTree[depth-i-1][j]
+            if gameState == None:
+                break
+            #update max position before getting features
+            gameState.data.agentStates[maxIndex].configuration.pos = maxPos            
+            features = self.getFeatures(gameState, 'Stop')
+            weights = self.getWeights(gameState, 'Stop')
+            value = features * weights
+            if value < min:
+                min = value
+                minPos = minTree[depth-i-1][j].data.agentStates[minIndex].configuration.pos
+        # find the max position for the team
+        for j in range(len(maxTree[depth-i-1])):
+            gameState = maxTree[depth-i-1][j]
+            if gameState == None:
+                break
+            #update min position before getting features
+            gameState.data.agentStates[minIndex].configuration.pos = minPos
+            features = self.getFeatures(gameState, 'Stop')
+            weights = self.getWeights(gameState, 'Stop')
+            value = features * weights
+            if value > max:
+                max = value
+                maxPos = maxTree[depth-i-1][j].data.agentStates[maxIndex].configuration.pos            
+            
+    return maxPos
+            
+            
+
+  def buildTree(self, index, gameState, depth):
+    '''
+    Build one side (Min or Max) of a whole tree, two sides combined together can be
+    used for searching
+    '''
+    gameStates = [list() for j in range(depth)]
+    gameStates[0].append(gameState.deepCopy())
+    #print '0', '0', gameStates[0][0].data.agentStates[index].configuration.pos
+    
+    for i in range(depth-1):
+        j = 0
+        for state in gameStates[i]:
+            if state == None:
+                break
+            else:
+                actions = self.getLegalActions(state.data.agentStates[index].configuration.pos)
+                for act in actions:
+                    temp = self.getSuccessor(index, state, act)
+                    successor = temp.deepCopy()
+                    successor.data.agentStates = copy.deepcopy(temp.data.agentStates)
+                    
+                    gameStates[i+1].append(successor)
+                    #print i+1, j, gameStates[i+1][j].data.agentStates[index].configuration.pos
+                    j += 1
+   
+    return gameStates
 
   def getFeatures(self, gameState, action):
     """
     Returns a counter of features for the state
     """
     features = util.Counter()
-    successor = self.getSuccessor(gameState, action)
+    successor = self.getSuccessor(self.index, gameState, action)
     features['successorScore'] = self.getScore(successor)
     return features
 
@@ -291,7 +401,7 @@ class GreatAgent(CaptureAgent):
   """
   def getMutationFeatures(self, gameState, action):
     features = util.Counter()
-    successor = self.getSuccessor(gameState, action)
+    successor = self.getSuccessor(self.index, gameState, action)
     position = self.getPosition(gameState)
 
     distances = 0.0
@@ -349,6 +459,26 @@ class GreatAgent(CaptureAgent):
       if next_y < 0 or next_y == walls.height: continue
       if not walls.data[next_x][next_y]: neighbors.append((next_x, next_y))
     return neighbors
+
+  def getLegalActions(self, position):
+      allActions = ['North', 'South', 'West', 'East']
+      actions = list()
+      m, n = position
+      neighbors = self.getLegalNeighbors(position, self.walls)
+      for pos in neighbors:
+          x, y = pos
+          if pos == position:
+              actions.append('Stop')
+          elif x == m and y == n+1:
+              actions.append('North')
+          elif x == m and y == n-1:
+              actions.append('South')
+          elif x == m+1 and y == n:
+              actions.append('East')
+          elif x == m-1 and y == n:
+              actions.append('West')      
+        
+      return actions
 
   def getNextPosition(self, gameState, position, action):
       x,y = position
@@ -443,6 +573,19 @@ class GreatAgent(CaptureAgent):
           tree[(x,y)] = val
           y += 1
 
+  def isBeingCaptured(self, gameState, action):
+      myNextPosition = gameState.generateSuccessor(self.index, action).getAgentPosition(self.index)
+      opponentPositions = self.getOpponentPositions(gameState)
+      
+      for pos in opponentPositions:
+          if pos != None:
+              neighbors = self.getLegalNeighbors(pos, self.walls)
+              for nextPos in neighbors:
+                  if nextPos == myNextPosition:
+                      return True
+      
+      return False
+      
 
 class GoalBasedAgent(GreatAgent):
   def chooseAction(self, gameState):
@@ -462,7 +605,7 @@ class GoalBasedAgent(GreatAgent):
     for a in actions:
       nextAgentState = gameState.generateSuccessor(self.index, a).getAgentState(self.index)
       if (not nextAgentState.isPacman) and (nextAgentState.scaredTimer == 0):
-        nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+        nextPosition = self.getSuccessor(self.index, gameState, a).getAgentPosition(self.index)
         if nextPosition in self.teamData.opponentPositions:
           return a
     
@@ -494,7 +637,7 @@ class GoalBasedAgent(GreatAgent):
       if a == Directions.STOP: 
         values.append(10000) #don't stop
         continue
-      nextPosition = self.getSuccessor(gameState, a).getAgentPosition(self.index)
+      nextPosition = self.getSuccessor(self.index, gameState, a).getAgentPosition(self.index)
       values.append(self.getMazeDistance(goal, nextPosition))
     
     minValue = min(values)
@@ -507,7 +650,7 @@ class GoalBasedAgent(GreatAgent):
     currentPosition = self.getPosition(gameState)
     currentPositionDistance = self.distanceToClosestEnemy(gameState, currentPosition)
     nextAgentState = gameState.generateSuccessor(self.index, action).getAgentState(self.index)
-    nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    nextPosition = self.getSuccessor(self.index, gameState, action).getAgentPosition(self.index)
     nextPositionDistance = self.distanceToClosestEnemy(gameState, nextPosition)
     
     # you won't get eaten if you are a ghost and not scared
@@ -567,7 +710,7 @@ class GoalBasedAgent(GreatAgent):
     
     # if no good goal was found just run away
     action = self.pickActionFurthestFromEnemies(gameState, gameState.getLegalActions(self.index))
-    self.teamData.goal[self.index / 2] = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+    self.teamData.goal[self.index / 2] = self.getSuccessor(self.index, gameState, action).getAgentPosition(self.index)
   
   def goalIsImpossible(self, goal, currentPosition, enemyDistance):
     distanceToGoal = self.getMazeDistance(goal, currentPosition)
@@ -584,7 +727,7 @@ class GoalBasedAgent(GreatAgent):
     values = []
     currentPosition = gameState.getAgentPosition(self.index)
     for action in possibleActions:
-      nextPosition = self.getSuccessor(gameState, action).getAgentPosition(self.index)
+      nextPosition = self.getSuccessor(self.index, gameState, action).getAgentPosition(self.index)
       if action == Directions.STOP: 
         values.append((-2,action)) #give stopping a negative value
         continue
@@ -613,7 +756,7 @@ class GoalBasedAgent(GreatAgent):
 class ExperimentalAgent(GreatAgent):
  
   def getFeatures(self, gameState, action):
-    successor= self.getSuccessor(gameState, action)
+    successor= self.getSuccessor(self.index, gameState, action)
     nextPosition = successor.getAgentPosition(self.index)
     features = util.Counter()
     
@@ -652,7 +795,7 @@ class ExperimentalAgent(GreatAgent):
     return features
 
   def getWeights(self, gameState, action):
-    successorState = self.getSuccessor(gameState, action)
+    successorState = self.getSuccessor(self.index, gameState, action)
     weights = util.Counter()
     weights['foodProximity'] = 1
     weights['foodLeft'] = -5
@@ -673,9 +816,14 @@ class OffensiveGreatAgent(GreatAgent):
   """
   def getFeatures(self, gameState, action):
     features = self.getMutationFeatures(gameState, action)
-    successor = self.getSuccessor(gameState, action)
+    successor = self.getSuccessor(self.index, gameState, action)
     
     features['successorScore'] = self.getScore(successor)
+    
+    if self.isBeingCaptured(gameState, action) == True:
+        features['beingCaptured'] = 1
+    else: 
+        features['beingCaptured'] = 0
     
     # Compute distance to the nearest food
     foodList = self.getFood(successor).asList()
@@ -693,6 +841,7 @@ class OffensiveGreatAgent(GreatAgent):
     weights['numFood'] = -1000
     # Favor reaching new food the most
     weights['distanceToFood'] = -5
+    weights['beingCaptured'] = -10
     return weights
 
 class DefensiveGreatAgent(GreatAgent):
@@ -705,7 +854,7 @@ class DefensiveGreatAgent(GreatAgent):
 
   def getFeatures(self, gameState, action):
     features = self.getMutationFeatures(gameState, action)
-    successor = self.getSuccessor(gameState, action)
+    successor = self.getSuccessor(self.index, gameState, action)
 
     myState = successor.getAgentState(self.index)
     myPos = myState.getPosition()
@@ -737,13 +886,6 @@ class DefensiveGreatAgent(GreatAgent):
       distance = distance + self.getMazeDistance(myPos, food)
     features['totalDistancesToFood'] = distance
 
-    '''
-    agentsInternalIndex = []
-    for i, j in enumerate(self.getTeam(gameState)):
-        if self.teamData.team[i] == 'defense':
-            agentsInternalIndex.append(i)
-    '''
-            
     if len(self.teamData.defenseAgents) == 2 and self.agentType != 'offense':
         if self.index == self.teamData.defenseAgents[0]:
             actions = [action, 'Stop']
@@ -755,7 +897,6 @@ class DefensiveGreatAgent(GreatAgent):
         distance = self.getFutureAgentsDistance(gameState, self.teamData.defenseAgents, actions, step)
         features['friendsDistance'] = distance
     
-
     return features
 
   def getWeights(self, gameState, action):
@@ -768,6 +909,7 @@ class DefensiveGreatAgent(GreatAgent):
     weights['reverse'] = -1
     if len(self.teamData.defenseAgents) == 2 and self.agentType != 'offense':
         weights['friendsDistance'] = 0.3
+        
     return weights
 
 
