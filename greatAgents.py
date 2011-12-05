@@ -26,9 +26,9 @@ from copy import deepcopy
 class GreatAgents(AgentFactory):
   "Returns three offensive great agents"
   
-  def __init__(self, isRed, **args):
+  def __init__(self, isRed, first='offense', second='defense', third='defense', rest='offense', **args):
     AgentFactory.__init__(self, isRed)
-    self.agents = ["goal", "goal", "goal"]
+    self.agents = [first, second, third]
     self.teamData = TeamData() 
   def getAgent(self, index):
       return self.choose(self.agents.pop(0), index)

@@ -35,14 +35,13 @@ Settings:
 """
 
 # Alpha-Numeric only
-TeamName = 'Great Agents'
+TeamName = 'GreatAgents'
 
 # Filename.FactoryClassName (CASE-sensitive)
 AgentFactory = 'greatAgents.GreatAgents'
 
-Partners = []
+Partners = ['Pablo Ceballos', 'Anton Poon', 'Wei Chen']
 
-#AgentArgs = {'first':'offense', 'second':'defense'}
-AgentArgs = {}
+AgentArgs = {'first':'defense', 'second':'defense', 'third':'defense'}
 
-NotifyList = []
+NotifyList = ['pabloc11@stanford.edu','antonp@stanford.edu', 'wechen@stanford.edu']
