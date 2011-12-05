@@ -1,9 +1,9 @@
 .project
 .pydevproject
-.pyc
+*.pyc
 GPATH
 GRTAGS
 GSYMS
 GTAGS
 tags
-                    
+!upgradedAgents.pyc
