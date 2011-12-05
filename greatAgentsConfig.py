@@ -42,6 +42,6 @@ AgentFactory = 'greatAgents.GreatAgents'
 
 Partners = ['Pablo Ceballos', 'Anton Poon', 'Wei Chen']
 
-AgentArgs = {'first':'defense', 'second':'defense', 'third':'defense'}
+AgentArgs = {'first':'goal', 'second':'goal', 'third':'goal'}
 
 NotifyList = ['pabloc11@stanford.edu','antonp@stanford.edu', 'wechen@stanford.edu']
