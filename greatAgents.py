@@ -185,20 +185,58 @@ class GreatAgent(CaptureAgent):
       self.startingFood = len(self.getFoodYouAreDefending(gameState).asList())
       self.theirStartingFood = len(self.getFood(gameState).asList())
     
+    #start = time.time()
+    
     self.updateBeliefs(gameState)
     
     """
     Picks among the actions with the highest Q(s,a).
     """
-    actions = gameState.getLegalActions(self.index)
+    
+    opponentPositions = self.getOpponentPositions(gameState)
+    opponents = self.getOpponents(gameState)
+    
+    search = False
+    # if opponents are observable, use MiniMax to determine next move
+    for i, pos in enumerate(opponentPositions):
+        if pos != None: 
+            index = opponents[i]
+            
+            # Only do adversarial search if this agent is the one that can observe opponent
+            if util.manhattanDistance(self.getPosition(gameState), pos) <= 5:
+                search = True
+                break
+    
+    if search == True: 
+        depth = 2           
+        gameState1 = gameState.deepCopy()    
+        gameState1.data.agentStates[index].configuration = copy.copy(gameState1.data.agentStates[self.index].configuration)    
+        gameState1.data.agentStates[index].configuration.pos = pos
+        myTree = self.buildTree(self.index, gameState1, depth)
+        opponentTree = self.buildTree(index, gameState1, depth)
+        
+        maxPos = self.miniMax(self.index, index, myTree, opponentTree, depth)
+        legalActions = self.getLegalActions(self.getPosition(gameState))
+        bestActions = list()
+        for act in legalActions:
+            if self.getNextPosition(gameState, self.getPosition(gameState), act) == maxPos:
+                bestActions.append(act)
+                break
+            
+        if len(bestActions) == 0:
+            bestActions.append('Stop')
+    else:
+        actions = gameState.getLegalActions(self.index)
+    
+        # You can profile your evaluation time by uncommenting these lines
+        # start = time.time()
+        values = [self.evaluate(gameState, a) for a in actions]
+        # print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
+    
+        maxValue = max(values)
+        bestActions = [a for a, v in zip(actions, values) if v == maxValue]
 
-    # You can profile your evaluation time by uncommenting these lines
-    # start = time.time()
-    values = [self.evaluate(gameState, a) for a in actions]
-    # print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
-
-    maxValue = max(values)
-    bestActions = [a for a, v in zip(actions, values) if v == maxValue]
+    #print 'eval time for agent %d: %.4f' % (self.index, time.time() - start)
 
     return random.choice(bestActions)
 
@@ -293,6 +331,7 @@ class GreatAgent(CaptureAgent):
     """
     Computes a linear combination of features and feature weights
     """
+    '''
     depth = 3
     
     opponentPositions = self.getOpponentPositions(gameState)
@@ -309,6 +348,7 @@ class GreatAgent(CaptureAgent):
             myTree = self.buildTree(self.index, gameState1, depth)
             opponentTree = self.buildTree(index, gameState1, depth)
             maxPos = self.miniMax(self.index, index, myTree, opponentTree, depth)
+    '''    
         
     features = self.getFeatures(gameState, action)
     weights = self.getWeights(gameState, action)
@@ -320,10 +360,14 @@ class GreatAgent(CaptureAgent):
     MiniMax search on the combined tree with max for first row and min
     for the last row.  Retur
     '''
+    weights = self.getWeights(None, 'Stop')
+    if self.agentType == 'defense':
+        weights['totalDistancesToFood'] = 0
+        weights['percentTheirFoodLeft'] = 0
      
     maxPos = maxTree[0][0].data.agentStates[maxIndex].configuration.pos
     for i in range(depth-1):
-        min, max = 10000, 0 
+        min, max = 10000000, -10000000 
         # find the min position for the opponent
         for j in range(len(minTree[depth-i-1])):
             gameState = minTree[depth-i-1][j]
@@ -332,7 +376,11 @@ class GreatAgent(CaptureAgent):
             #update max position before getting features
             gameState.data.agentStates[maxIndex].configuration.pos = maxPos            
             features = self.getFeatures(gameState, 'Stop')
-            weights = self.getWeights(gameState, 'Stop')
+            
+            if gameState.data.agentStates[minIndex].configuration.pos == maxPos:
+                features['beingCaptured'] = 1            
+            features['enemyPacmanNearMe'] = util.manhattanDistance(gameState.data.agentStates[minIndex].configuration.pos, maxPos)
+            
             value = features * weights
             if value < min:
                 min = value
@@ -345,7 +393,12 @@ class GreatAgent(CaptureAgent):
             #update min position before getting features
             gameState.data.agentStates[minIndex].configuration.pos = minPos
             features = self.getFeatures(gameState, 'Stop')
-            weights = self.getWeights(gameState, 'Stop')
+            
+            
+            if gameState.data.agentStates[maxIndex].configuration.pos == minPos:
+                features['beingCaptured'] = 1            
+            features['enemyPacmanNearMe'] = util.manhattanDistance(gameState.data.agentStates[maxIndex].configuration.pos, minPos)
+            
             value = features * weights
             if value > max:
                 max = value
@@ -362,10 +415,12 @@ class GreatAgent(CaptureAgent):
     '''
     gameStates = [list() for j in range(depth)]
     gameStates[0].append(gameState.deepCopy())
+    posDict = util.Counter()
     #print '0', '0', gameStates[0][0].data.agentStates[index].configuration.pos
     
     for i in range(depth-1):
         j = 0
+        posDict.clear()
         for state in gameStates[i]:
             if state == None:
                 break
@@ -376,7 +431,9 @@ class GreatAgent(CaptureAgent):
                     successor = temp.deepCopy()
                     successor.data.agentStates = copy.deepcopy(temp.data.agentStates)
                     
-                    gameStates[i+1].append(successor)
+                    if posDict.has_key(successor.data.agentStates[index].configuration.pos) == False:
+                        gameStates[i+1].append(successor)
+                        posDict[(successor.data.agentStates[index].configuration.pos)] = True
                     #print i+1, j, gameStates[i+1][j].data.agentStates[index].configuration.pos
                     j += 1
    
@@ -905,7 +962,7 @@ class DefensiveGreatAgent(GreatAgent):
     weights = regularMutation.goalieDWeightsDict
     weights['numInvaders'] = -100
     weights['onDefense'] = 100
-    weights['invaderDistance'] = -1.5
+    weights['invaderDistance'] = -10
     weights['totalDistancesToFood'] = -0.1
     weights['stop'] = -1
     weights['reverse'] = -1
